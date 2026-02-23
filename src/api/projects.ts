@@ -58,6 +58,7 @@ export async function fetchChorusInsights(
         Accept: 'application/json',
       },
       body: JSON.stringify({ revision }),
+      signal,
     },
   );
 
