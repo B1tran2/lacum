@@ -1,15 +1,42 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import useChorusInsights from '../hooks/useChorusInsights';
 import useProject from '../hooks/useProject';
+
+const layoutStyle = { margin: '2rem auto', maxWidth: 900, padding: '0 1rem' };
+
+const alertStyle = {
+  border: '1px solid #dc2626',
+  borderRadius: 8,
+  background: '#fef2f2',
+  color: '#7f1d1d',
+  padding: '0.75rem 1rem',
+};
+
+const preStyle = {
+  overflowX: 'auto',
+  background: '#0f172a',
+  color: '#e2e8f0',
+  borderRadius: 8,
+  padding: '1rem',
+  lineHeight: 1.4,
+};
 
 export default function ProjectPage() {
   const { projectId = '' } = useParams();
   const normalizedProjectId = useMemo(() => projectId.trim(), [projectId]);
   const { data, loading, error } = useProject(normalizedProjectId);
+  const [insightsRequested, setInsightsRequested] = useState(false);
+  const insightsRevision = insightsRequested && data ? data.revision : null;
+  const {
+    data: insights,
+    loading: insightsLoading,
+    error: insightsError,
+  } = useChorusInsights(normalizedProjectId, insightsRevision);
 
   if (!normalizedProjectId) {
     return (
-      <main style={{ margin: '2rem auto', maxWidth: 900, padding: '0 1rem' }}>
+      <main style={layoutStyle}>
         <h1>Project Viewer</h1>
         <p>No project selected.</p>
       </main>
@@ -18,7 +45,7 @@ export default function ProjectPage() {
 
   if (loading) {
     return (
-      <main style={{ margin: '2rem auto', maxWidth: 900, padding: '0 1rem' }}>
+      <main style={layoutStyle}>
         <h1>Project Viewer</h1>
         <p>Loading project...</p>
       </main>
@@ -27,18 +54,9 @@ export default function ProjectPage() {
 
   if (error) {
     return (
-      <main style={{ margin: '2rem auto', maxWidth: 900, padding: '0 1rem' }}>
+      <main style={layoutStyle}>
         <h1>Project Viewer</h1>
-        <section
-          role="alert"
-          style={{
-            border: '1px solid #dc2626',
-            borderRadius: 8,
-            background: '#fef2f2',
-            color: '#7f1d1d',
-            padding: '0.75rem 1rem',
-          }}
-        >
+        <section role="alert" style={alertStyle}>
           <h2 style={{ marginTop: 0 }}>Could not load project</h2>
           <p style={{ marginBottom: 0 }}>{error.message}</p>
         </section>
@@ -48,7 +66,7 @@ export default function ProjectPage() {
 
   if (!data) {
     return (
-      <main style={{ margin: '2rem auto', maxWidth: 900, padding: '0 1rem' }}>
+      <main style={layoutStyle}>
         <h1>Project Viewer</h1>
         <p>No project data found.</p>
       </main>
@@ -56,7 +74,7 @@ export default function ProjectPage() {
   }
 
   return (
-    <main style={{ margin: '2rem auto', maxWidth: 900, padding: '0 1rem' }}>
+    <main style={layoutStyle}>
       <header style={{ marginBottom: '1.25rem' }}>
         <h1 style={{ marginBottom: '0.5rem' }}>Project Viewer</h1>
         <p style={{ margin: 0, color: '#475569' }}>Viewing project: {data.projectId}</p>
@@ -87,20 +105,66 @@ export default function ProjectPage() {
         </dl>
       </section>
 
+      <section style={{ marginBottom: '1.25rem' }}>
+        <h2>Chorus Insights</h2>
+        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+          <button type="button" onClick={() => setInsightsRequested(true)} disabled={insightsLoading}>
+            Load insights
+          </button>
+          <button type="button" onClick={() => setInsightsRequested(false)} disabled={insightsLoading}>
+            Clear
+          </button>
+        </div>
+
+        {!insightsRequested && !insightsLoading && !insightsError && !insights && <p>No insights loaded.</p>}
+        {insightsLoading && <p>Loading insights...</p>}
+
+        {insightsError && (
+          <section role="alert" style={alertStyle}>
+            <h3 style={{ marginTop: 0 }}>Could not load insights</h3>
+            <p style={{ marginBottom: 0 }}>{insightsError.message}</p>
+          </section>
+        )}
+
+        {insights && (
+          <div>
+            <p>{insights.globalNarrative}</p>
+
+            <h3>Risk flags</h3>
+            {insights.riskFlags.length > 0 ? (
+              <ul>
+                {insights.riskFlags.map((flag) => (
+                  <li key={flag}>{flag}</li>
+                ))}
+              </ul>
+            ) : (
+              <p>No risk flags.</p>
+            )}
+
+            <h3>Section insights</h3>
+            {insights.sectionInsights.map((sectionInsight) => (
+              <article
+                key={sectionInsight.sectionId}
+                style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem', marginBottom: '1rem' }}
+              >
+                <h4 style={{ marginTop: 0 }}>Section {sectionInsight.sectionId}</h4>
+                <p>
+                  <strong>What happens:</strong> {sectionInsight.whatHappens}
+                </p>
+                <p>
+                  <strong>Why it feels like that:</strong> {sectionInsight.whyItFeelsLikeThat}
+                </p>
+                <h5>Evidence</h5>
+                <pre style={preStyle}>{JSON.stringify(sectionInsight.evidence, null, 2)}</pre>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
       <section>
         <h2>Data preview</h2>
-        <pre
-          style={{
-            overflowX: 'auto',
-            background: '#0f172a',
-            color: '#e2e8f0',
-            borderRadius: 8,
-            padding: '1rem',
-            lineHeight: 1.4,
-          }}
-        >
-          {JSON.stringify(data, null, 2)}
-        </pre>
+        <pre style={preStyle}>{JSON.stringify(data, null, 2)}</pre>
       </section>
     </main>
   );
