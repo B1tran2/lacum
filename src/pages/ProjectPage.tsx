@@ -4,6 +4,7 @@ import {
   clearProjectScheduler,
   clearTrackPlaybackConfig,
   isPlaying,
+  renderProjectToWav,
   setProjectScheduler,
   setTrackPlaybackConfig,
   startTransport,
@@ -48,6 +49,7 @@ export default function ProjectPage() {
   const [previewEnabled, setPreviewEnabled] = useState(false);
   const [trackMixer, setTrackMixer] = useState<TrackMixerState[]>([]);
   const [insightsRequested, setInsightsRequested] = useState(false);
+  const [exportingWav, setExportingWav] = useState(false);
 
   useEffect(() => {
     if (!data) {
@@ -145,6 +147,28 @@ export default function ProjectPage() {
         track.trackId === trackId ? { ...track, muted: !track.muted } : track,
       ),
     );
+  };
+
+  const handleExportWav = async () => {
+    if (!data || previewNotes.length === 0 || exportingWav) {
+      return;
+    }
+
+    setExportingWav(true);
+
+    try {
+      const blob = await renderProjectToWav(previewNotes, data.global.bpm, trackMixer);
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `${data.projectId}.wav`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl);
+    } finally {
+      setExportingWav(false);
+    }
   };
 
   if (!normalizedProjectId) {
@@ -300,6 +324,14 @@ export default function ProjectPage() {
             })}
           </div>
         )}
+      </section>
+
+
+      <section style={{ marginBottom: '1.25rem' }}>
+        <h2>Export</h2>
+        <button type="button" onClick={handleExportWav} disabled={previewNotes.length === 0 || exportingWav}>
+          {exportingWav ? 'Exporting...' : 'Export WAV'}
+        </button>
       </section>
 
       <section style={{ marginBottom: '1.25rem' }}>
