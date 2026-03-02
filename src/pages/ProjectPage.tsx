@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { isPlaying, startTransport, stopTransport } from '../audio/transport';
 import useChorusInsights from '../hooks/useChorusInsights';
 import useProject from '../hooks/useProject';
 
@@ -26,6 +27,7 @@ export default function ProjectPage() {
   const { projectId = '' } = useParams();
   const normalizedProjectId = useMemo(() => projectId.trim(), [projectId]);
   const { data, loading, error } = useProject(normalizedProjectId);
+  const [transportPlaying, setTransportPlaying] = useState<boolean>(isPlaying());
   const [insightsRequested, setInsightsRequested] = useState(false);
   const insightsRevision = insightsRequested && data ? data.revision : null;
   const {
@@ -33,6 +35,26 @@ export default function ProjectPage() {
     loading: insightsLoading,
     error: insightsError,
   } = useChorusInsights(normalizedProjectId, insightsRevision);
+
+  useEffect(() => {
+    return () => {
+      stopTransport();
+    };
+  }, []);
+
+  const handlePlayTransport = () => {
+    if (!data) {
+      return;
+    }
+
+    startTransport(data.global.bpm);
+    setTransportPlaying(isPlaying());
+  };
+
+  const handleStopTransport = () => {
+    stopTransport();
+    setTransportPlaying(isPlaying());
+  };
 
   if (!normalizedProjectId) {
     return (
@@ -107,6 +129,19 @@ export default function ProjectPage() {
           <dt>Tracks</dt>
           <dd>{data.midi.tracks.length}</dd>
         </dl>
+      </section>
+
+      <section style={{ marginBottom: '1.25rem' }}>
+        <h2>Transport</h2>
+        <p style={{ marginTop: 0 }}>BPM: {data.global.bpm}</p>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button type="button" onClick={handlePlayTransport} disabled={transportPlaying}>
+            Play
+          </button>
+          <button type="button" onClick={handleStopTransport} disabled={!transportPlaying}>
+            Stop
+          </button>
+        </div>
       </section>
 
       <section style={{ marginBottom: '1.25rem' }}>
