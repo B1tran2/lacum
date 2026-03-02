@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { isPlaying, startTransport, stopTransport } from '../audio/transport';
+import {
+  clearProjectScheduler,
+  isPlaying,
+  setProjectScheduler,
+  startTransport,
+  stopTransport,
+} from '../audio/transport';
 import useChorusInsights from '../hooks/useChorusInsights';
 import useProject from '../hooks/useProject';
+
+const TICKS_PER_BEAT = 480;
+const MAX_PREVIEW_NOTES = 64;
 
 const layoutStyle = { margin: '2rem auto', maxWidth: 900, padding: '0 1rem' };
 
@@ -28,7 +37,25 @@ export default function ProjectPage() {
   const normalizedProjectId = useMemo(() => projectId.trim(), [projectId]);
   const { data, loading, error } = useProject(normalizedProjectId);
   const [transportPlaying, setTransportPlaying] = useState<boolean>(isPlaying());
+  const [previewEnabled, setPreviewEnabled] = useState(false);
   const [insightsRequested, setInsightsRequested] = useState(false);
+
+  const previewNotes = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+
+    return [...data.midi.notes]
+      .sort((a, b) => a.startTicks - b.startTicks)
+      .slice(0, MAX_PREVIEW_NOTES)
+      .map((note) => ({
+        pitch: note.pitch,
+        startBeats: note.startTicks / TICKS_PER_BEAT,
+        durationBeats: Math.max(note.durationTicks / TICKS_PER_BEAT, 0.125),
+        velocity: note.velocity,
+      }));
+  }, [data]);
+
   const insightsRevision = insightsRequested && data ? data.revision : null;
   const {
     data: insights,
@@ -37,7 +64,17 @@ export default function ProjectPage() {
   } = useChorusInsights(normalizedProjectId, insightsRevision);
 
   useEffect(() => {
+    if (previewEnabled && previewNotes.length > 0) {
+      setProjectScheduler(() => previewNotes);
+      return;
+    }
+
+    clearProjectScheduler();
+  }, [previewEnabled, previewNotes]);
+
+  useEffect(() => {
     return () => {
+      clearProjectScheduler();
       stopTransport();
     };
   }, []);
@@ -54,6 +91,10 @@ export default function ProjectPage() {
   const handleStopTransport = () => {
     stopTransport();
     setTransportPlaying(isPlaying());
+  };
+
+  const handlePreviewToggle = () => {
+    setPreviewEnabled((current) => !current);
   };
 
   if (!normalizedProjectId) {
@@ -98,9 +139,9 @@ export default function ProjectPage() {
   return (
     <main style={layoutStyle}>
       <header style={{ marginBottom: '1.25rem' }}>
-      <p style={{ marginTop: 0 }}>
-        <Link to="/">Back to Home</Link>
-      </p>
+        <p style={{ marginTop: 0 }}>
+          <Link to="/">Back to Home</Link>
+        </p>
 
         <h1 style={{ marginBottom: '0.5rem' }}>Project Viewer</h1>
         <p style={{ margin: 0, color: '#475569' }}>Viewing project: {data.projectId}</p>
@@ -142,6 +183,20 @@ export default function ProjectPage() {
             Stop
           </button>
         </div>
+      </section>
+
+      <section style={{ marginBottom: '1.25rem' }}>
+        <h2>Preview</h2>
+        <p style={{ marginTop: 0 }}>
+          Note timing uses a fixed {TICKS_PER_BEAT} ticks-per-beat conversion for this prototype.
+        </p>
+        <button type="button" onClick={handlePreviewToggle} disabled={previewNotes.length === 0}>
+          {previewEnabled ? 'Disable note preview' : 'Enable note preview'}
+        </button>
+        {previewNotes.length === 0 && <p>No notes available for preview.</p>}
+        {previewNotes.length > 0 && (
+          <p style={{ marginBottom: 0 }}>Previewing up to {previewNotes.length} notes from the project.</p>
+        )}
       </section>
 
       <section style={{ marginBottom: '1.25rem' }}>
