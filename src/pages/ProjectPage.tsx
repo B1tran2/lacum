@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import useChorusInsights from '../hooks/useChorusInsights';
 import useProject from '../hooks/useProject';
 
@@ -76,6 +76,10 @@ export default function ProjectPage() {
   return (
     <main style={layoutStyle}>
       <header style={{ marginBottom: '1.25rem' }}>
+      <p style={{ marginTop: 0 }}>
+        <Link to="/">Back to Home</Link>
+      </p>
+
         <h1 style={{ marginBottom: '0.5rem' }}>Project Viewer</h1>
         <p style={{ margin: 0, color: '#475569' }}>Viewing project: {data.projectId}</p>
       </header>
