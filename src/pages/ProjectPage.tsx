@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   clearProjectScheduler,
+  clearTrackPlaybackConfig,
   isPlaying,
   setProjectScheduler,
+  setTrackPlaybackConfig,
   startTransport,
   stopTransport,
 } from '../audio/transport';
@@ -12,6 +14,12 @@ import useProject from '../hooks/useProject';
 
 const TICKS_PER_BEAT = 480;
 const MAX_PREVIEW_NOTES = 64;
+
+interface TrackMixerState {
+  trackId: string;
+  gain: number;
+  muted: boolean;
+}
 
 const layoutStyle = { margin: '2rem auto', maxWidth: 900, padding: '0 1rem' };
 
@@ -38,7 +46,29 @@ export default function ProjectPage() {
   const { data, loading, error } = useProject(normalizedProjectId);
   const [transportPlaying, setTransportPlaying] = useState<boolean>(isPlaying());
   const [previewEnabled, setPreviewEnabled] = useState(false);
+  const [trackMixer, setTrackMixer] = useState<TrackMixerState[]>([]);
   const [insightsRequested, setInsightsRequested] = useState(false);
+
+  useEffect(() => {
+    if (!data) {
+      setTrackMixer([]);
+      return;
+    }
+
+    setTrackMixer((current) => {
+      const currentMap = new Map(current.map((item) => [item.trackId, item]));
+      return data.midi.tracks.map((track) => {
+        const existing = currentMap.get(track.trackId);
+        return (
+          existing ?? {
+            trackId: track.trackId,
+            gain: 1,
+            muted: false,
+          }
+        );
+      });
+    });
+  }, [data]);
 
   const previewNotes = useMemo(() => {
     if (!data) {
@@ -49,6 +79,7 @@ export default function ProjectPage() {
       .sort((a, b) => a.startTicks - b.startTicks)
       .slice(0, MAX_PREVIEW_NOTES)
       .map((note) => ({
+        trackId: note.trackId,
         pitch: note.pitch,
         startBeats: note.startTicks / TICKS_PER_BEAT,
         durationBeats: Math.max(note.durationTicks / TICKS_PER_BEAT, 0.125),
@@ -64,6 +95,10 @@ export default function ProjectPage() {
   } = useChorusInsights(normalizedProjectId, insightsRevision);
 
   useEffect(() => {
+    setTrackPlaybackConfig(trackMixer);
+  }, [trackMixer]);
+
+  useEffect(() => {
     if (previewEnabled && previewNotes.length > 0) {
       setProjectScheduler(() => previewNotes);
       return;
@@ -75,6 +110,7 @@ export default function ProjectPage() {
   useEffect(() => {
     return () => {
       clearProjectScheduler();
+      clearTrackPlaybackConfig();
       stopTransport();
     };
   }, []);
@@ -95,6 +131,20 @@ export default function ProjectPage() {
 
   const handlePreviewToggle = () => {
     setPreviewEnabled((current) => !current);
+  };
+
+  const handleTrackGainChange = (trackId: string, gain: number) => {
+    setTrackMixer((current) =>
+      current.map((track) => (track.trackId === trackId ? { ...track, gain } : track)),
+    );
+  };
+
+  const handleTrackMuteToggle = (trackId: string) => {
+    setTrackMixer((current) =>
+      current.map((track) =>
+        track.trackId === trackId ? { ...track, muted: !track.muted } : track,
+      ),
+    );
   };
 
   if (!normalizedProjectId) {
@@ -196,6 +246,59 @@ export default function ProjectPage() {
         {previewNotes.length === 0 && <p>No notes available for preview.</p>}
         {previewNotes.length > 0 && (
           <p style={{ marginBottom: 0 }}>Previewing up to {previewNotes.length} notes from the project.</p>
+        )}
+      </section>
+
+      <section style={{ marginBottom: '1.25rem' }}>
+        <h2>Track Mixer</h2>
+        {data.midi.tracks.length === 0 ? (
+          <p>No tracks available for mixing.</p>
+        ) : (
+          <div style={{ display: 'grid', gap: '0.75rem' }}>
+            {data.midi.tracks.map((track) => {
+              const config =
+                trackMixer.find((item) => item.trackId === track.trackId) ??
+                ({ trackId: track.trackId, gain: 1, muted: false } as TrackMixerState);
+
+              return (
+                <article
+                  key={track.trackId}
+                  style={{
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 8,
+                    padding: '0.75rem 1rem',
+                    display: 'grid',
+                    gridTemplateColumns: '1fr auto auto',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                  }}
+                >
+                  <div>
+                    <strong>{track.name}</strong>
+                    <p style={{ margin: '0.25rem 0 0', color: '#475569' }}>{track.trackId}</p>
+                  </div>
+
+                  <label style={{ display: 'grid', gap: '0.25rem' }}>
+                    <span>Gain: {config.gain.toFixed(2)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={config.gain}
+                      onChange={(event) =>
+                        handleTrackGainChange(track.trackId, Number(event.target.value))
+                      }
+                    />
+                  </label>
+
+                  <button type="button" onClick={() => handleTrackMuteToggle(track.trackId)}>
+                    {config.muted ? 'Unmute' : 'Mute'}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
         )}
       </section>
 

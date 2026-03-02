@@ -10,11 +10,18 @@ const SYNTH_DECAY_SECONDS = 0.04;
 const SYNTH_SUSTAIN_LEVEL = 0.6;
 const SYNTH_RELEASE_SECONDS = 0.02;
 
-interface ProjectNoteEvent {
+export interface ProjectNoteEvent {
+  trackId: string;
   pitch: number;
   startBeats: number;
   durationBeats: number;
   velocity: number;
+}
+
+export interface TrackPlaybackConfig {
+  trackId: string;
+  gain: number;
+  muted: boolean;
 }
 
 let audioContext: AudioContext | null = null;
@@ -28,11 +35,22 @@ let playing = false;
 let projectNotesProvider: (() => ProjectNoteEvent[]) | null = null;
 let scheduledProjectNoteIndex = 0;
 
+const trackPlaybackConfigMap = new Map<string, TrackPlaybackConfig>();
+const trackGainNodes = new Map<string, GainNode>();
+
+let masterGainNode: GainNode | null = null;
+
 const activeOscillators = new Set<OscillatorNode>();
 
 function getAudioContext(): AudioContext {
   if (!audioContext) {
     audioContext = new AudioContext();
+  }
+
+  if (!masterGainNode) {
+    masterGainNode = audioContext.createGain();
+    masterGainNode.gain.setValueAtTime(1, audioContext.currentTime);
+    masterGainNode.connect(audioContext.destination);
   }
 
   return audioContext;
@@ -51,6 +69,28 @@ function currentTransportBeat(context: AudioContext): number {
   return elapsedSeconds / beatsToSeconds(1, currentBpm);
 }
 
+function getTrackPlaybackConfig(trackId: string): TrackPlaybackConfig {
+  return trackPlaybackConfigMap.get(trackId) ?? { trackId, gain: 1, muted: false };
+}
+
+function applyTrackGain(trackId: string): GainNode {
+  const context = getAudioContext();
+
+  let trackGainNode = trackGainNodes.get(trackId);
+  if (!trackGainNode) {
+    trackGainNode = context.createGain();
+    trackGainNodes.set(trackId, trackGainNode);
+    trackGainNode.connect(masterGainNode!);
+  }
+
+  const config = getTrackPlaybackConfig(trackId);
+  const normalizedGain = Math.min(Math.max(config.gain, 0), 1);
+  const effectiveGain = config.muted ? 0 : normalizedGain;
+  trackGainNode.gain.setValueAtTime(effectiveGain, context.currentTime);
+
+  return trackGainNode;
+}
+
 function scheduleClick(time: number, accent: boolean): void {
   const context = getAudioContext();
   const oscillator = context.createOscillator();
@@ -64,7 +104,7 @@ function scheduleClick(time: number, accent: boolean): void {
   gainNode.gain.exponentialRampToValueAtTime(0.0001, time + CLICK_DURATION_SECONDS);
 
   oscillator.connect(gainNode);
-  gainNode.connect(context.destination);
+  gainNode.connect(masterGainNode!);
 
   oscillator.start(time);
   oscillator.stop(time + CLICK_DURATION_SECONDS + 0.01);
@@ -81,6 +121,7 @@ function scheduleSynthNote(time: number, note: ProjectNoteEvent): void {
   const context = getAudioContext();
   const oscillator = context.createOscillator();
   const gainNode = context.createGain();
+  const trackGainNode = applyTrackGain(note.trackId);
 
   const noteDurationSeconds = Math.max(beatsToSeconds(note.durationBeats, currentBpm), 0.01);
   const velocityGain = Math.min(Math.max(note.velocity / 127, 0.05), 1);
@@ -100,7 +141,7 @@ function scheduleSynthNote(time: number, note: ProjectNoteEvent): void {
   gainNode.gain.linearRampToValueAtTime(0.0001, releaseEnd);
 
   oscillator.connect(gainNode);
-  gainNode.connect(context.destination);
+  gainNode.connect(trackGainNode);
 
   oscillator.start(time);
   oscillator.stop(releaseEnd + 0.005);
@@ -139,8 +180,10 @@ function scheduleProjectNotes(context: AudioContext): void {
       break;
     }
 
+    const trackConfig = getTrackPlaybackConfig(note.trackId);
     const noteTime = transportStartTime + beatsToSeconds(note.startBeats, currentBpm);
-    if (noteTime >= context.currentTime - 0.01) {
+
+    if (!trackConfig.muted && noteTime >= context.currentTime - 0.01) {
       scheduleSynthNote(noteTime, note);
     }
 
@@ -174,6 +217,7 @@ export function setProjectScheduler(getNotes: () => ProjectNoteEvent[]): void {
   const beatNow = currentTransportBeat(context);
   const projectNotes = getProjectNotes();
   scheduledProjectNoteIndex = projectNotes.findIndex((note) => note.startBeats >= beatNow);
+
   if (scheduledProjectNoteIndex === -1) {
     scheduledProjectNoteIndex = projectNotes.length;
   }
@@ -182,6 +226,32 @@ export function setProjectScheduler(getNotes: () => ProjectNoteEvent[]): void {
 export function clearProjectScheduler(): void {
   projectNotesProvider = null;
   scheduledProjectNoteIndex = 0;
+}
+
+export function setTrackPlaybackConfig(configs: TrackPlaybackConfig[]): void {
+  trackPlaybackConfigMap.clear();
+
+  for (const config of configs) {
+    const normalizedGain = Math.min(Math.max(config.gain, 0), 1);
+    trackPlaybackConfigMap.set(config.trackId, {
+      trackId: config.trackId,
+      gain: normalizedGain,
+      muted: config.muted,
+    });
+  }
+
+  for (const trackId of trackGainNodes.keys()) {
+    applyTrackGain(trackId);
+  }
+}
+
+export function clearTrackPlaybackConfig(): void {
+  trackPlaybackConfigMap.clear();
+
+  const context = getAudioContext();
+  for (const trackGainNode of trackGainNodes.values()) {
+    trackGainNode.gain.setValueAtTime(1, context.currentTime);
+  }
 }
 
 export function isPlaying(): boolean {
@@ -221,8 +291,8 @@ export function stopTransport(): void {
       // Oscillator may already be stopped.
     }
   }
-  activeOscillators.clear();
 
+  activeOscillators.clear();
   playing = false;
   scheduledProjectNoteIndex = 0;
 }
